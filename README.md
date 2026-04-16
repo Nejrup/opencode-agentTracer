@@ -1,6 +1,6 @@
-# agentTracer
+# opencode-agenttracer
 
-Local plugin for self-improving agent proposals.
+Local plugin package for the agentTracer self-improvement proposal flow.
 
 ## What it does
 

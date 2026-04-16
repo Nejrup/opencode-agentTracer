@@ -1,5 +1,5 @@
 {
-  "name": "agenttracer-local",
+  "name": "opencode-agenttracer",
   "private": true,
   "type": "module",
   "scripts": {
