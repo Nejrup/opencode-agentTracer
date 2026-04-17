@@ -4,14 +4,23 @@ Local plugin package for the agentTracer self-improvement proposal flow.
 
 ## What it does
 
-Tracks agent-driven proposals (e.g., agent instruction improvements), validates them via evals, and commits accepted versions to lineage. Provides the `/agent-selfimprove` command as a read-only review entrypoint; mutation steps remain separate.
+Tracks agent-driven proposals (e.g., agent instruction improvements), aggressively records evidence when agents are stuck, confused, blocked, or missing required capability, validates proposals via evals, and commits accepted versions to lineage. Provides the `/agent-selfimprove` command as a read-only review entrypoint; mutation steps remain separate.
 
 ## Key constraints
 
-- **Runtime-root rule**: All artifacts (signals, proposals, evals, versions, lineage, history) live under the parent profile `.agentTracer/` directory, not inside this package. The plugin derives runtime root from the profile context.
+- **Runtime-root rule**: All artifacts (signals, proposals, evals, versions, lineage, history) live under the current profile repo's `.agentTracer/` directory, not inside this package or the active worktree. The plugin derives runtime root from the profile context and rejects data roots that escape it.
 - **One open proposal per issue key**: At most one open proposal per agent + kind + normalized summary.
 - **Eval required before accept**: No proposal is accepted without recorded eval evidence.
 - **Manual fallback**: `agenttracer_selfimprove` tool provides backend/manual invocation when the command is unavailable.
+
+## Aggressive trigger categories
+
+- Blocked/disallowed tool use
+- Permission or sandbox denial
+- Environment restrictions (for example no network or read-only filesystem)
+- Missing required tool/capability/access
+- Explicit confusion, ambiguity, or missing-context language
+- Explicit stuck/unfulfillable/failure-loop language, including repeated inability loops
 
 ## Runtime data
 

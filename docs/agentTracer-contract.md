@@ -16,15 +16,16 @@ Status: canonical product contract.
 ## Preserved invariants
 
 - Scope stays profile-local.
-- Plugin-managed runtime artifacts stay under the parent profile's `./.agentTracer/`.
+- Plugin-managed runtime artifacts stay under the current profile repo's `./.agentTracer/` and never under the active worktree.
 - Trusted explicit correction input stays the canonical `agenttracer-correction` fenced block.
 - Supported signal sources stay limited to:
   - `user-correction`
   - `same-agent-correction-loop`
+  - `agent-stuck-state`
 - Proposal creation stays thresholded and deduped:
   - 1 normalized issue key = `agent + kind + normalized summary`
   - at least 2 corroborating signals inside 30 days
-  - at least 1 tagged user correction
+  - usually at least 1 tagged user correction plus an explicit corrective retry loop, or at least 2 aggressive stuck/unfulfillable signals for the same issue
   - at most 1 open proposal per issue key
 - Default operator UX stays review-first and read-only via `/agent-selfimprove`.
 - Approval and eval stay manual.
@@ -60,7 +61,19 @@ Anything outside this canonical block contract is ignored.
 
 ### Same-agent correction loop
 
-The only implicit companion signal allowed in the Phase 1 contract is `same-agent-correction-loop`: the same detected agent is re-engaged in the same session with explicit corrective retry wording after a tagged correction. This signal can support a proposal, but it cannot replace the requirement for at least one tagged user correction.
+`same-agent-correction-loop` remains the tagged-correction companion signal: the same detected agent is re-engaged in the same session with explicit corrective retry wording after a tagged correction.
+
+### Aggressive stuck-state signal
+
+`agent-stuck-state` captures aggressive evidence whenever task-invocation text indicates a meaningful blocked or unfulfillable state, including:
+
+- blocked/disallowed tool use
+- permission or sandbox denial
+- missing required tool/capability/access
+- explicit confusion, ambiguity, or missing critical context
+- explicit stuck, repeated-failure, or unable-to-fulfill language
+
+These signals are intended to surface both prompt-improvement opportunities and cases where the right next step may be lifting permissions or expanding available capability.
 
 ## Lifecycle scope
 

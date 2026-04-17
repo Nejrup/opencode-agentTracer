@@ -6,6 +6,7 @@ import {
 	mkdir,
 	readdir,
 	readFile,
+	realpath,
 	writeFile,
 } from "node:fs/promises"
 import * as path from "node:path"
@@ -30,9 +31,169 @@ const SELF_IMPROVE_COMMAND_TEMPLATE = [
 const ALLOWED_KINDS = ["instruction", "workflow", "verification", "communication"] as const
 const CORRECTIVE_RETRY_PATTERN =
 	/\b(retry|re-run|rerun|try again|correct(?:ion|ive)?|revise|revision|rework|failed review|review feedback|reviewer feedback|address feedback|address reviewer|re-review)\b/i
+type NamedPattern = {
+	trigger: string
+	pattern: RegExp
+}
+const BLOCKED_TOOL_PATTERN =
+	/\b(not allowed|disallowed|forbidden|blocked|unsupported|unavailable|not available|cannot use|can't use|do not use|should not use|isn't allowed|is not allowed)\b/i
+const BLOCKED_TOOL_CONTEXT_PATTERN =
+	/\b(do not use|don't use|cannot use|can't use|should not use|blocked from using|not allowed(?:\s+for)?|forbidden|disallowed|isn't allowed|is not allowed)\b/i
+const PERMISSION_PATTERNS = [
+	{
+		trigger: "permission-denied",
+		pattern: /\b(permission denied|access denied|not permitted|insufficient permissions?)\b/i,
+	},
+	{
+		trigger: "approval-required",
+		pattern:
+			/\b(permission required|approval required|requires approval|needs approval|requires permission|needs permission|requires elevated access|requires elevated permissions?)\b/i,
+	},
+	{
+		trigger: "permission-not-granted",
+		pattern:
+			/\b(i do not have permission|i don't have permission|do not have permission|don't have permission|access is not granted|permission has not been granted|without approval|without permission)\b/i,
+	},
+	{
+		trigger: "sandbox-denied",
+		pattern: /\b(denied by sandbox|restricted by sandbox|sandbox prevented|sandbox blocks?|sandbox denies?)\b/i,
+	},
+] as const satisfies readonly NamedPattern[]
+const ENVIRONMENT_PATTERNS = [
+	{
+		trigger: "read-only-filesystem",
+		pattern:
+			/\b(read-only filesystem|read only filesystem|read-only fs|read only fs|filesystem is read-only|file system is read-only)\b/i,
+	},
+	{
+		trigger: "network-restricted",
+		pattern:
+			/\b(no network access|network access(?:\s+is)?\s+unavailable|offline environment|cannot reach the network|can't reach the network|environment does not allow network|environment doesn't allow network)\b/i,
+	},
+	{
+		trigger: "sandboxed-environment",
+		pattern: /\b(sandboxed|sandbox environment|running in a sandbox|this sandbox)\b/i,
+	},
+	{
+		trigger: "environment-restricted",
+		pattern: /\b(environment restriction|environment restrictions|not available in this environment|environment does not allow|environment doesn't allow)\b/i,
+	},
+	{
+		trigger: "timeout-or-resource-cap",
+		pattern:
+			/\b(timed out|timeout(?:\s+limit)?|time limit exceeded|execution time limit|resource limit|resource limits|resource cap|resource caps|memory limit|cpu limit|quota exceeded|rate limited?)\b/i,
+	},
+] as const satisfies readonly NamedPattern[]
+const CAPABILITY_PATTERNS = [
+	{
+		trigger: "tool-unavailable",
+		pattern: /\b(tool unavailable|tool not available|missing tool|no available tool|no supported tool)\b/i,
+	},
+	{
+		trigger: "tool-not-installed",
+		pattern: /\b(tool not installed|not installed here|binary missing|cli missing)\b/i,
+	},
+	{
+		trigger: "command-not-found",
+		pattern: /\b(command not found|not found on path)\b/i,
+	},
+	{
+		trigger: "capability-unavailable",
+		pattern:
+			/\b(capability unavailable|capability not available|missing capability|lack(?:s|ing)? (?:the )?(?:required )?(?:tool|capability|access)|required [a-z0-9._-]+ access is unavailable|required [a-z0-9._-]+ tool is unavailable|required [a-z0-9._-]+ capability is unavailable|required [a-z0-9._-]+ api is unavailable|required [a-z0-9._-]+ api is not accessible)\b/i,
+	},
+	{
+		trigger: "access-unavailable",
+		pattern: /\b(api not accessible|api access is unavailable|service not accessible|required access is unavailable|access unavailable)\b/i,
+	},
+	{
+		trigger: "execution-capability-missing",
+		pattern:
+			/\b(not supported here|unsupported here|cannot browse|can't browse|cannot edit|can't edit|cannot write|can't write|cannot run|can't run|cannot execute|can't execute|cannot access|can't access)\b/i,
+	},
+] as const satisfies readonly NamedPattern[]
+const CONFUSION_PATTERNS = [
+	{
+		trigger: "unclear-or-ambiguous",
+		pattern:
+			/\b(confused|not sure|unsure|unclear|ambiguous|don't understand|do not understand|can't tell|cannot tell)\b/i,
+	},
+	{
+		trigger: "missing-context",
+		pattern:
+			/\b(missing context|need more context|need more info(?:rmation)?|need clarification|needs clarification|requires clarification|not enough information|missing information|insufficient (?:context|information|detail(?:s)?)|lack(?:ing)? (?:context|information|detail(?:s)?)|need additional context|need more details)\b/i,
+	},
+] as const satisfies readonly NamedPattern[]
+const STUCK_PATTERNS = [
+	{
+		trigger: "stuck",
+		pattern: /\b(stuck|failed again|still failing|keeps failing|retry loop|repeated failure)\b/i,
+	},
+	{
+		trigger: "cannot-proceed",
+		pattern: /\b(unable to proceed|cannot proceed|can't proceed|unable to continue|cannot continue|can't continue)\b/i,
+	},
+	{
+		trigger: "explicit-inability",
+		pattern:
+			/\b(?:can't|cannot|can not|unable to|not able to)\s+(?:complete|finish|fulfill|help|comply|proceed|continue|do|perform|carry out|resolve|provide|deliver|satisfy)\b/i,
+	},
+	{
+		trigger: "request-unfulfillable",
+		pattern:
+			/\b(?:this|the)\s+request\s+(?:can't|cannot|can not|could not|couldn't)\s+be\s+(?:completed|fulfilled|done)\b/i,
+	},
+	{
+		trigger: "unfinished",
+		pattern:
+			/\b(could not finish|couldn't finish|unable to complete|cannot complete|can't complete|unable to fulfill|cannot fulfill|can't fulfill)\b/i,
+	},
+] as const satisfies readonly NamedPattern[]
+const BLOCKED_TOOL_NAME_PATTERNS = [
+	/[`"']([a-z0-9._-]+)[`"']/i,
+	/\buse\s+the\s+([a-z0-9._-]+)\s+tool\b/i,
+	/\buse\s+([a-z0-9._-]+)\s+tool\b/i,
+	/\bthe\s+([a-z0-9._-]+)\s+tool\b/i,
+	/\btool\s+([a-z0-9._-]+)\b/i,
+	/\btool\s+[`"']([a-z0-9._-]+)[`"']/i,
+	/\buse\s+[`"']([a-z0-9._-]+)[`"']/i,
+	/\buse\s+([a-z0-9._-]+)\b/i,
+] as const
+const CAPABILITY_NAME_PATTERNS = [
+	/\brequired\s+([a-z0-9._-]+)\s+(?:tool|capability|access)\s+is\s+unavailable\b/i,
+	/\b(?:required|missing)\s+(?:tool|capability|access)\s+([a-z0-9._-]+)\b/i,
+	/\b([a-z0-9._-]+)\s+is\s+unavailable\b/i,
+	/\b[`"']?([a-z0-9._-]+)[`"']?\s*:\s*command not found\b/i,
+	/\b(?:tool|command|api|service|binary|cli)\s+[`"']?([a-z0-9._ -]+)[`"']?\s+not\s+found\b/i,
+	/\b(?:tool|command|api|service|binary|cli)\s+[`"']?([a-z0-9._ -]+)[`"']?\s+(?:is\s+)?(?:unavailable|not available|missing|not installed|not accessible)\b/i,
+	/\b(?:missing|need|needs|requires|required)\s+(?:the\s+)?(?:tool|capability|access)\s+[`"']?([a-z0-9._ -]+)[`"']?/i,
+	/\b(?:cannot|can't|unable to)\s+(browse|edit|write|run|execute|access)\b/i,
+] as const
+const EXTRACTED_NAME_STOP_WORDS = new Set([
+	"a",
+	"an",
+	"the",
+	"is",
+	"tool",
+	"command",
+	"capability",
+	"access",
+	"api",
+	"service",
+	"binary",
+	"cli",
+	"required",
+	"missing",
+	"needed",
+	"available",
+	"unavailable",
+	"allowed",
+	"not",
+	"use",
+])
 
 type CorrectionKind = (typeof ALLOWED_KINDS)[number]
-type SignalSource = "user-correction" | "same-agent-correction-loop"
+type SignalSource = "user-correction" | "same-agent-correction-loop" | "agent-stuck-state"
 type ProposalStatus = "open" | "accepted" | "dismissed"
 type EvalStatus = "pass" | "fail"
 type ProposalHealthState = "awaiting-candidate" | "awaiting-eval" | "eval-failed" | "ready-to-accept"
@@ -257,6 +418,14 @@ type TaskInvocation = {
 	retrySignal?: string
 }
 
+type DetectedTaskIssue = {
+	category: "blocked-tool" | "permission" | "environment" | "capability" | "confusion" | "stuck"
+	kind: CorrectionKind
+	summary: string
+	signature: string
+	metadata: Record<string, unknown>
+}
+
 type AgentTracerServiceOptions = {
 	profileRoot?: string
 	directory?: string
@@ -323,11 +492,61 @@ function formatJson(value: unknown): string {
 }
 
 function resolveProfileRoot(options: AgentTracerServiceOptions): string {
-	const runtimeRoot = [options.profileRoot, options.directory, options.worktree].find(
-		(value): value is string => typeof value === "string" && Boolean(value.trim()),
-	)
+	const explicitProfileRoot = options.profileRoot?.trim()
+	if (explicitProfileRoot) {
+		return path.resolve(explicitProfileRoot)
+	}
 
-	return path.resolve(runtimeRoot ?? process.cwd())
+	return path.resolve(process.cwd())
+}
+
+function resolveDataRoot(profileRoot: string, configuredDataRoot?: string): string {
+	const candidate = configuredDataRoot?.trim()
+	if (!candidate) {
+		return path.join(profileRoot, ".agentTracer")
+	}
+
+	const resolved = path.resolve(profileRoot, candidate)
+	const relativeToProfileRoot = path.relative(profileRoot, resolved)
+	if (
+		relativeToProfileRoot === ".." ||
+		relativeToProfileRoot.startsWith(`..${path.sep}`) ||
+		path.isAbsolute(relativeToProfileRoot)
+	) {
+		throw new Error(`agentTracer data root must stay inside the current profile root: ${profileRoot}`)
+	}
+
+	return resolved
+}
+
+async function resolveEffectivePath(targetPath: string): Promise<string> {
+	let currentPath = path.resolve(targetPath)
+	const missingSegments: string[] = []
+
+	while (!(await pathExists(currentPath))) {
+		const parentPath = path.dirname(currentPath)
+		if (parentPath === currentPath) {
+			break
+		}
+		missingSegments.unshift(path.basename(currentPath))
+		currentPath = parentPath
+	}
+
+	const resolvedExistingPath = await realpath(currentPath)
+	return path.resolve(resolvedExistingPath, ...missingSegments)
+}
+
+async function assertPathStaysWithinRoot(rootPath: string, targetPath: string, label: string): Promise<void> {
+	const resolvedRootPath = await realpath(rootPath)
+	const resolvedTargetPath = await resolveEffectivePath(targetPath)
+	const relativeToRoot = path.relative(resolvedRootPath, resolvedTargetPath)
+	if (
+		relativeToRoot === ".." ||
+		relativeToRoot.startsWith(`..${path.sep}`) ||
+		path.isAbsolute(relativeToRoot)
+	) {
+		throw new Error(`agentTracer ${label} must stay inside the current profile root: ${resolvedRootPath}`)
+	}
 }
 
 function hasCorrectiveRetrySignal(value?: string): boolean {
@@ -343,6 +562,170 @@ function extractRetrySignal(value: unknown): string | undefined {
 		.map((item) => item.trim())
 	if (pieces.length === 0) return
 	return pieces.join("\n")
+}
+
+function extractBlockedToolName(value?: string): string | undefined {
+	if (!value || !BLOCKED_TOOL_PATTERN.test(value)) return
+	if (!BLOCKED_TOOL_CONTEXT_PATTERN.test(value)) return
+
+	for (const pattern of BLOCKED_TOOL_NAME_PATTERNS) {
+		const match = value.match(pattern)
+		const toolName = normalizeExtractedName(match?.[1])
+		if (toolName) return toolName
+	}
+}
+
+function extractCapabilityName(value?: string): string | undefined {
+	if (!value) return
+
+	for (const pattern of CAPABILITY_NAME_PATTERNS) {
+		const match = value.match(pattern)
+		const capabilityName = normalizeExtractedName(match?.[1])
+		if (capabilityName) return capabilityName
+	}
+}
+
+function matchPatternTrigger(value: string | undefined, patterns: readonly NamedPattern[]): string | undefined {
+	if (!value) return
+
+	for (const { trigger, pattern } of patterns) {
+		if (pattern.test(value)) return trigger
+	}
+}
+
+function normalizeExtractedName(value: string | undefined): string | undefined {
+	const normalizedValue = value?.trim().toLowerCase()
+	if (!normalizedValue) return
+
+	const token = normalizedValue
+		.split(/\s+/)
+		.find((part) => part && !EXTRACTED_NAME_STOP_WORDS.has(part))
+	if (!token) return
+	if (!/^[a-z0-9._-]+$/i.test(token)) return
+	return token
+}
+
+function detectTaskIssue(agent: string, retrySignal?: string): DetectedTaskIssue | undefined {
+	if (!retrySignal) return
+
+	const blockedToolName = extractBlockedToolName(retrySignal)
+	if (blockedToolName) {
+		return {
+			category: "blocked-tool",
+			kind: "workflow",
+			summary: `When ${agent} is blocked from using tool \`${blockedToolName}\`, stop retrying it and either switch to an allowed tool or explicitly request lifted permissions.`,
+			signature: `blocked-tool:${blockedToolName}`,
+			metadata: {
+				blockedTool: blockedToolName,
+				issueCategory: "blocked-tool",
+			},
+		}
+	}
+
+	if (BLOCKED_TOOL_CONTEXT_PATTERN.test(retrySignal)) {
+		return {
+			category: "blocked-tool",
+			kind: "workflow",
+			summary: `When ${agent} is blocked from using a disallowed or forbidden tool, stop retrying it and either switch to an allowed tool or explicitly request lifted permissions.`,
+			signature: "blocked-tool:generic",
+			metadata: {
+				issueCategory: "blocked-tool",
+			},
+		}
+	}
+
+	const permissionTrigger = matchPatternTrigger(retrySignal, PERMISSION_PATTERNS)
+	if (permissionTrigger) {
+		return {
+			category: "permission",
+			kind: "workflow",
+			summary: `When ${agent} hits permission or sandbox limits, stop and explicitly request the needed permission or choose an allowed fallback.`,
+			signature: "permission-or-sandbox",
+			metadata: {
+				issueTrigger: permissionTrigger,
+				issueCategory: "permission",
+			},
+		}
+	}
+
+	const environmentTrigger = matchPatternTrigger(retrySignal, ENVIRONMENT_PATTERNS)
+	if (environmentTrigger) {
+		return {
+			category: "environment",
+			kind: "workflow",
+			summary: `When ${agent} is blocked by environment restrictions, explain the restriction clearly and request a different environment, lifted access, or the best allowed fallback.`,
+			signature: "environment-restriction",
+			metadata: {
+				issueTrigger: environmentTrigger,
+				issueCategory: "environment",
+			},
+		}
+	}
+
+	const capabilityTrigger = matchPatternTrigger(retrySignal, CAPABILITY_PATTERNS)
+	if (capabilityTrigger) {
+		const capabilityName = extractCapabilityName(retrySignal)
+		return {
+			category: "capability",
+			kind: "workflow",
+			summary: capabilityName
+				? `When ${agent} lacks required capability \`${capabilityName}\`, say so explicitly and request it or choose an allowed fallback.`
+				: `When ${agent} lacks a required tool or capability, say what is missing and request it or choose an allowed fallback.`,
+				signature: `capability:${capabilityName ?? "generic"}`,
+				metadata: {
+					capability: capabilityName,
+					issueTrigger: capabilityTrigger,
+					issueCategory: "capability",
+				},
+			}
+	}
+
+	const confusionTrigger = matchPatternTrigger(retrySignal, CONFUSION_PATTERNS)
+	if (confusionTrigger) {
+		return {
+			category: "confusion",
+			kind: "instruction",
+			summary: `When ${agent} is confused or missing critical context, state the gap clearly and ask a targeted clarification instead of guessing.`,
+			signature: "confusion-or-missing-context",
+			metadata: {
+				issueTrigger: confusionTrigger,
+				issueCategory: "confusion",
+			},
+		}
+	}
+
+	const stuckTrigger = matchPatternTrigger(retrySignal, STUCK_PATTERNS)
+	if (stuckTrigger) {
+		return {
+			category: "stuck",
+			kind: "communication",
+			summary: `When ${agent} is stuck or unable to fulfill the request, stop looping and explain the unblock needed or the best available fallback.`,
+			signature: "stuck-or-unfulfillable",
+			metadata: {
+				issueTrigger: stuckTrigger,
+				issueCategory: "stuck",
+			},
+		}
+	}
+}
+
+function shouldOpenProposal(signals: SignalRecord[]): boolean {
+	if (signals.length < 2) return false
+
+	const userCorrectionCount = signals.filter((signal) => signal.source === "user-correction").length
+	const explicitCorrectionLoopCount = signals.filter(
+		(signal) =>
+			signal.source === "same-agent-correction-loop" &&
+			signal.metadata.loopType === "explicit-corrective-retry",
+	).length
+	if (userCorrectionCount >= 1 && explicitCorrectionLoopCount >= 1) return true
+
+	const autonomousIssueCount = signals.filter(
+		(signal) =>
+			signal.source === "agent-stuck-state" ||
+			signal.metadata.loopType === "repeated-blocked-tool-misuse",
+	).length
+	return autonomousIssueCount >= 2
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {
@@ -515,7 +898,7 @@ function renderSelfImproveReview(review: SelfImproveReview): string {
 			...intro,
 			"",
 			"No open evidence-backed improvements are waiting for approval right now.",
-			"If you expected a proposal, remember the threshold: at least 2 corroborating signals inside 30 days, including at least 1 tagged user correction.",
+			"If you expected a proposal, remember the threshold: at least 2 corroborating signals inside 30 days, usually a tagged user correction plus explicit corrective retry, or 2 aggressive stuck/unfulfillable signals for the same issue.",
 			"Lineage/bootstrap remains lazy and profile-local: the first evidence-backed proposal initializes the baseline lineage for that agent.",
 		].join("\n")
 	}
@@ -632,7 +1015,7 @@ function renderProposalMarkdown(
 
 export function createAgentTracerService(options: AgentTracerServiceOptions = {}) {
 	const profileRoot = resolveProfileRoot(options)
-	const dataRoot = options.dataRoot ?? path.join(profileRoot, ".agentTracer")
+	const dataRoot = resolveDataRoot(profileRoot, options.dataRoot)
 	const agentsDir = path.join(profileRoot, "agents")
 	const signalsDir = path.join(dataRoot, "signals")
 	const proposalsDir = path.join(dataRoot, "proposals")
@@ -684,6 +1067,7 @@ export function createAgentTracerService(options: AgentTracerServiceOptions = {}
 	async function ensureInitialized(): Promise<void> {
 		if (!initPromise) {
 			initPromise = (async () => {
+			await assertPathStaysWithinRoot(profileRoot, dataRoot, "data root")
 				await Promise.all([
 					mkdir(signalsDir, { recursive: true }),
 					mkdir(proposalsDir, { recursive: true }),
@@ -1030,7 +1414,7 @@ export function createAgentTracerService(options: AgentTracerServiceOptions = {}
 			.sort((left, right) => left.observedAt - right.observedAt)
 
 		const userCorrectionCount = signals.filter((signal) => signal.source === "user-correction").length
-		if (signals.length < 2 || userCorrectionCount < 1) return
+		if (!shouldOpenProposal(signals)) return
 
 		const openProposal = proposals.find(
 			(proposal) => proposal.issueKey === triggerSignal.issueKey && proposal.status === "open",
@@ -1150,16 +1534,56 @@ export function createAgentTracerService(options: AgentTracerServiceOptions = {}
 		const sessionAgentKey = toSessionAgentKey(input.sessionID, agent)
 		const previousInvocation = lastTaskBySessionAgent.get(sessionAgentKey)
 		const correctionContext = latestCorrectionBySessionAgent.get(sessionAgentKey)
+		const detectedIssue = detectTaskIssue(agent, input.retrySignal)
 
 		lastTaskBySessionAgent.set(sessionAgentKey, {
 			callID: input.callID,
 			observedAt,
 			retrySignal: input.retrySignal,
 		})
-		if (!previousInvocation || !correctionContext) return
-		if (correctionContext.observedAt <= previousInvocation.observedAt) return
-		if (observedAt <= correctionContext.observedAt) return
-		if (!hasCorrectiveRetrySignal(input.retrySignal)) return
+		let recordedIssueSignal: SignalRecord | undefined
+
+		if (detectedIssue) {
+			const isRepeatedIssueLoop =
+				previousInvocation &&
+				detectTaskIssue(agent, previousInvocation.retrySignal)?.signature === detectedIssue.signature &&
+				observedAt > previousInvocation.observedAt
+			const signal: SignalRecord = {
+				version: DATA_VERSION,
+				id: createArtifactID(
+					"signal",
+					`${agent}:${detectedIssue.signature}:${input.sessionID}:${input.callID}`,
+					observedAt,
+				),
+				source: "agent-stuck-state",
+				agent,
+				kind: detectedIssue.kind,
+				summary: detectedIssue.summary,
+				normalizedSummary: normalizeSummary(detectedIssue.summary),
+				issueKey: createIssueKey(agent, detectedIssue.kind, detectedIssue.summary),
+				createdAt: currentTime(),
+				observedAt,
+				sessionID: input.sessionID,
+				fingerprint: sha256(`agent-stuck-state:${agent}:${input.sessionID}:${detectedIssue.signature}:${input.callID}`),
+				metadata: {
+					previousCallID: previousInvocation?.callID,
+					previousInvocationObservedAt: previousInvocation?.observedAt,
+					previousRetrySignal: previousInvocation?.retrySignal,
+					loopType: isRepeatedIssueLoop ? "repeated-agent-stuck-state" : undefined,
+					currentCallID: input.callID,
+					currentInvocationObservedAt: observedAt,
+					retrySignal: input.retrySignal,
+					...detectedIssue.metadata,
+				},
+			}
+
+			recordedIssueSignal = await recordSignal(signal)
+		}
+
+		if (!previousInvocation || !correctionContext) return recordedIssueSignal
+		if (correctionContext.observedAt <= previousInvocation.observedAt) return recordedIssueSignal
+		if (observedAt <= correctionContext.observedAt) return recordedIssueSignal
+		if (!hasCorrectiveRetrySignal(input.retrySignal)) return recordedIssueSignal
 
 		latestCorrectionBySessionAgent.delete(sessionAgentKey)
 		const signal: SignalRecord = {
