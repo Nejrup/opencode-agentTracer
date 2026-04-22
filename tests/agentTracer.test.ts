@@ -290,28 +290,28 @@ test("repeated blocked tool misuse emits workflow evidence and opens a proposal 
 	const harness = await createHarness(t, undefined, {
 		agents: {
 			coder: "# coder\n\nBase instructions.\n",
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
-	const retrySignal = "Blocked: do not use `py`; that tool is not allowed for explore in this repo."
+	const retrySignal = "Blocked: do not use `py`; that tool is not allowed for explorer in this repo."
 
 	const firstSignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-blocked-tool",
 		callID: "call-1",
 		retrySignal,
 		observedAt: harness.getNow(),
 	})
 	const secondSignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-blocked-tool",
 		callID: "call-2",
 		retrySignal,
 		observedAt: harness.getNow() + 1,
 	})
 	const thirdSignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-blocked-tool",
 		callID: "call-3",
 		retrySignal,
@@ -326,7 +326,7 @@ test("repeated blocked tool misuse emits workflow evidence and opens a proposal 
 	const state = await service.getState()
 	assert.equal(state.signals.length, 3)
 	assert.equal(state.proposals.length, 1)
-	assert.equal(state.proposals[0]?.agent, "explore")
+	assert.equal(state.proposals[0]?.agent, "explorer")
 	assert.equal(state.proposals[0]?.kind, "workflow")
 	assert.equal(state.proposals[0]?.userCorrectionCount, 0)
 	assert.match(state.proposals[0]?.summary ?? "", /blocked from using tool `py`/i)
@@ -335,16 +335,16 @@ test("repeated blocked tool misuse emits workflow evidence and opens a proposal 
 test("blocked tool parsing prefers the actual unquoted tool name over filler words", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 
 	const signal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-blocked-tool-unquoted",
 		callID: "call-1",
-		retrySignal: "Blocked: do not use the bash tool here; it is not allowed for explore.",
+		retrySignal: "Blocked: do not use the bash tool here; it is not allowed for explorer.",
 		observedAt: harness.getNow(),
 	})
 
@@ -356,13 +356,13 @@ test("blocked tool parsing prefers the actual unquoted tool name over filler wor
 test("blocked tool parsing still works for contraction phrasing like isn't allowed", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 
 	const signal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-blocked-tool-contraction",
 		callID: "call-1",
 		retrySignal: "The bash tool isn't allowed here.",
@@ -378,13 +378,13 @@ test("blocked tool parsing still works for contraction phrasing like isn't allow
 test("blocked tool wording without a stable tool name still records a generic blocked-tool signal", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 
 	const signal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-blocked-tool-generic",
 		callID: "call-1",
 		retrySignal: "Blocked: do not use the forbidden terminal here.",
@@ -400,13 +400,13 @@ test("blocked tool wording without a stable tool name still records a generic bl
 test("missing permission or ungranted access wording records a permission signal", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 
 	const signal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-permission-access-not-granted",
 		callID: "call-1",
 		retrySignal: "I do not have permission to finish this because access is not granted yet and it requires approval.",
@@ -422,13 +422,13 @@ test("missing permission or ungranted access wording records a permission signal
 test("tool not installed and command-not-found wording records a capability signal", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 
 	const signal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-capability-command-not-found",
 		callID: "call-1",
 		retrySignal: "I cannot continue because command `kubectl` not found; the tool is not installed here.",
@@ -445,13 +445,13 @@ test("tool not installed and command-not-found wording records a capability sign
 test("sandbox timeout and resource-cap wording records an environment signal", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 
 	const signal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-environment-resource-cap",
 		callID: "call-1",
 		retrySignal: "The run timed out because this environment is resource capped.",
@@ -467,13 +467,13 @@ test("sandbox timeout and resource-cap wording records an environment signal", a
 test("explicit inability wording records a stuck signal even without complete or fulfill phrasing", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 
 	const signal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-explicit-inability",
 		callID: "call-1",
 		retrySignal: "I can't do that with the current constraints.",
@@ -489,13 +489,13 @@ test("explicit inability wording records a stuck signal even without complete or
 test("need-more-info and missing-information wording records a confusion signal", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 
 	const signal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-confusion-need-more-info",
 		callID: "call-1",
 		retrySignal: "I need more info because the request is missing information about the target file.",
@@ -511,41 +511,41 @@ test("need-more-info and missing-information wording records a confusion signal"
 test("permission, capability, confusion, and stuck text each emit aggressive evidence signals", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 
 	const permissionSignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-permission",
 		callID: "call-permission",
 		retrySignal: "Permission denied by sandbox; approval required before I can continue.",
 		observedAt: harness.getNow(),
 	})
 	const capabilitySignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-capability",
 		callID: "call-capability",
 		retrySignal: "The required tool git is unavailable here, so I cannot execute that step.",
 		observedAt: harness.getNow() + 1,
 	})
 	const environmentSignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-environment",
 		callID: "call-environment",
 		retrySignal: "This step needs network access, but network access is unavailable in this environment.",
 		observedAt: harness.getNow() + 2,
 	})
 	const confusionSignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-confusion",
 		callID: "call-confusion",
 		retrySignal: "I'm not sure which target file is correct and need clarification before changing anything.",
 		observedAt: harness.getNow() + 3,
 	})
 	const stuckSignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-stuck",
 		callID: "call-stuck",
 		retrySignal: "I'm stuck and unable to fulfill the request with the current constraints.",
@@ -566,21 +566,21 @@ test("permission, capability, confusion, and stuck text each emit aggressive evi
 test("repeated explicit inability wording records a loop signal and opens a proposal", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 	const retrySignal = "I can't do that with the current constraints."
 
 	const firstSignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-explicit-inability-loop",
 		callID: "call-1",
 		retrySignal,
 		observedAt: harness.getNow(),
 	})
 	const secondSignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-explicit-inability-loop",
 		callID: "call-2",
 		retrySignal,
@@ -594,28 +594,28 @@ test("repeated explicit inability wording records a loop signal and opens a prop
 	const state = await service.getState()
 	assert.equal(state.signals.length, 2)
 	assert.equal(state.proposals.length, 1)
-	assert.equal(state.proposals[0]?.agent, "explore")
+	assert.equal(state.proposals[0]?.agent, "explorer")
 	assert.match(state.proposals[0]?.summary ?? "", /stuck or unable to fulfill/i)
 })
 
 test("repeated explicit inability records loop metadata and opens a proposal path", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 	const retrySignal = "I cannot complete this step because the required deploy access is unavailable."
 
 	const firstSignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-unfulfillable-loop",
 		callID: "call-1",
 		retrySignal,
 		observedAt: harness.getNow(),
 	})
 	const secondSignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-unfulfillable-loop",
 		callID: "call-2",
 		retrySignal,
@@ -629,20 +629,20 @@ test("repeated explicit inability records loop metadata and opens a proposal pat
 	const state = await service.getState()
 	assert.equal(state.signals.length, 2)
 	assert.equal(state.proposals.length, 1)
-	assert.equal(state.proposals[0]?.agent, "explore")
+	assert.equal(state.proposals[0]?.agent, "explorer")
 	assert.match(state.proposals[0]?.summary ?? "", /required capability `deploy`|required tool or capability/i)
 })
 
 test("capability parsing isolates the actual unquoted capability name", async (t: TestContext) => {
 	const harness = await createHarness(t, undefined, {
 		agents: {
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 
 	const signal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-capability-unquoted",
 		callID: "call-1",
 		retrySignal: "The required tool git is unavailable here, so I cannot execute that step.",
@@ -659,13 +659,13 @@ test("one tagged correction plus one blocked-tool retry records evidence but doe
 	const harness = await createHarness(t, undefined, {
 		agents: {
 			coder: "# coder\n\nBase instructions.\n",
-			explore: "# explore\n\nUse the allowed exploration tools only.\n",
+			explorer: "# explorer\n\nUse the allowed exploration tools only.\n",
 		},
 	})
 	const { service } = harness
 
 	await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-correction-blocked-tool",
 		callID: "call-1",
 		retrySignal: "Initial attempt before correction.",
@@ -677,7 +677,7 @@ test("one tagged correction plus one blocked-tool retry records evidence but doe
 		observedAt: harness.getNow() + 1,
 		text: [
 			"```agenttracer-correction",
-			"agent: explore",
+			"agent: explorer",
 			"kind: workflow",
 			"summary: Use only allowed tools for this profile.",
 			"why: The prior pass used a forbidden tool.",
@@ -685,10 +685,10 @@ test("one tagged correction plus one blocked-tool retry records evidence but doe
 		].join("\n"),
 	})
 	const blockedToolOnlySignal = await service.observeTaskInvocation({
-		agent: "explore",
+		agent: "explorer",
 		sessionID: "session-correction-blocked-tool",
 		callID: "call-2",
-		retrySignal: "Blocked: do not use `py`; that tool is not allowed for explore in this repo.",
+		retrySignal: "Blocked: do not use `py`; that tool is not allowed for explorer in this repo.",
 		observedAt: harness.getNow() + 2,
 	})
 
