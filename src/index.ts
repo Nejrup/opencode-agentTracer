@@ -497,6 +497,11 @@ function resolveProfileRoot(options: AgentTracerServiceOptions): string {
 		return path.resolve(explicitProfileRoot)
 	}
 
+	const configuredProfileRoot = process.env.OPENCODE_CONFIG_DIR?.trim()
+	if (configuredProfileRoot) {
+		return path.resolve(configuredProfileRoot)
+	}
+
 	return path.resolve(process.cwd())
 }
 

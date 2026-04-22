@@ -1,6 +1,6 @@
 import test, { type TestContext } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtemp, mkdir, readFile, readdir, realpath, stat, symlink, writeFile, rm } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, readdir, stat, symlink, writeFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -138,8 +138,9 @@ test("ensureInitialized keeps all runtime paths under .agentTracer", async (t: T
 	assert.deepEqual((await service.getState()).knownAgents, ["coder"])
 })
 
-test("service defaults runtime storage to the current profile root instead of directory/worktree", async (t: TestContext) => {
+test("service defaults runtime storage to the active profile root instead of directory/worktree", async (t: TestContext) => {
 	const previousCwd = process.cwd()
+	const previousConfigDir = process.env.OPENCODE_CONFIG_DIR
 	const profileRoot = await mkdtemp(path.join(tmpdir(), "agenttracer-profile-root-"))
 	const worktreeRoot = await mkdtemp(path.join(tmpdir(), "agenttracer-worktree-root-"))
 
@@ -147,20 +148,26 @@ test("service defaults runtime storage to the current profile root instead of di
 	await writeFile(path.join(profileRoot, "agents", "coder.md"), "# coder\n\nBase instructions.\n", "utf8")
 	t.after(async () => {
 		process.chdir(previousCwd)
+		if (previousConfigDir === undefined) {
+			delete process.env.OPENCODE_CONFIG_DIR
+		} else {
+			process.env.OPENCODE_CONFIG_DIR = previousConfigDir
+		}
 		await Promise.all([
 			rm(profileRoot, { recursive: true, force: true }),
 			rm(worktreeRoot, { recursive: true, force: true }),
 		])
 	})
 
-	process.chdir(profileRoot)
+	process.chdir(worktreeRoot)
+	process.env.OPENCODE_CONFIG_DIR = profileRoot
 	const service = createAgentTracerService({
 		directory: worktreeRoot,
 		worktree: path.join(worktreeRoot, "nested-repo"),
 	})
 	await service.ensureInitialized()
 
-	const resolvedProfileRoot = await realpath(profileRoot)
+	const resolvedProfileRoot = path.resolve(profileRoot)
 	assert.equal(service.paths.profileRoot, resolvedProfileRoot)
 	assert.equal(service.paths.dataRoot, path.join(resolvedProfileRoot, ".agentTracer"))
 	assert.ok(service.paths.dataRoot.startsWith(resolvedProfileRoot))
